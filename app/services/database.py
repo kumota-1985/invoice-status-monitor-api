@@ -6,6 +6,7 @@ import httpx
 from app.schemas.company import CompanyInfo, InvoiceStatus
 from app.schemas.monitor import WebhookPayload
 from app.core.config import settings
+from app.core.security import assert_safe_external_url
 
 # Mock National Tax Agency Invoice Database (Japanese Corporate Numbers are 13 digits)
 MOCK_INVOICE_DB: Dict[str, dict] = {
@@ -78,6 +79,8 @@ class DatabaseService:
     async def send_webhook_notification(webhook_url: str, payload: WebhookPayload, client: httpx.AsyncClient) -> bool:
         """Sends the Webhook event asynchronously using a shared httpx client."""
         try:
+            # Re-validate at send time too (defends against DNS rebinding since registration).
+            assert_safe_external_url(webhook_url)
             # model_dump(mode="json") converts datetime and enum objects to JSON-serializable types
             json_data = payload.model_dump(mode="json")
             response = await client.post(

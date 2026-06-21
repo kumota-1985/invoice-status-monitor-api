@@ -12,6 +12,7 @@ from app.schemas.monitor import (
 from app.services.database import DatabaseService
 from app.core.deps import limiter
 from app.core.config import settings
+from app.core.security import assert_safe_external_url
 
 router = APIRouter()
 
@@ -28,7 +29,17 @@ def register_monitor(request: Request, body: MonitorRegisterRequest):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Company with corporate number {body.corporate_number} not found."
         )
-    
+
+    # SSRF guard: reject webhook URLs that point at private/internal hosts.
+    try:
+        assert_safe_external_url(body.webhook_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid webhook_url: {exc}")
+
+    if len(DatabaseService.get_monitors(body.corporate_number)) >= settings.MAX_MONITORS_PER_COMPANY:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                            detail="Monitor limit reached for this corporate number.")
+
     monitor_id = DatabaseService.register_monitor(body.corporate_number, body.webhook_url)
     return MonitorRegisterResponse(
         success=True,

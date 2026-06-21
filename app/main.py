@@ -12,13 +12,13 @@ except TypeError:
     hashlib.md5 = md5_patched
 
 import httpx
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
-from app.core.deps import limiter
+from app.core.deps import limiter, require_proxy_secret
 from app.routers import r01_invoice_api, r02_monitor_api
 
 @asynccontextmanager
@@ -31,6 +31,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
+    description="Sandbox/demo API: qualified-invoice-issuer status lookup + webhook monitoring. "
+                "Company data is a small built-in MOCK set (3 companies), NOT the live "
+                "National Tax Agency registry. For demonstration and integration testing.",
     lifespan=lifespan
 )
 
@@ -42,14 +45,16 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,   # public API uses header keys, not cookies; "*"+credentials is invalid
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Route registration
-app.include_router(r01_invoice_api.router, prefix=settings.API_V1_STR, tags=["Invoice"])
-app.include_router(r02_monitor_api.router, prefix=settings.API_V1_STR, tags=["Monitor"])
+# Route registration (gated by the RapidAPI proxy secret when configured)
+app.include_router(r01_invoice_api.router, prefix=settings.API_V1_STR, tags=["Invoice"],
+                   dependencies=[Depends(require_proxy_secret)])
+app.include_router(r02_monitor_api.router, prefix=settings.API_V1_STR, tags=["Monitor"],
+                   dependencies=[Depends(require_proxy_secret)])
 
 @app.get("/")
 def read_root():
